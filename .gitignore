@@ -1,0 +1,6 @@
+extract_feat_alldiseases*
+checkpoints/*.pt
+Downstream/LP/*
+logs
+.venv
+.claude

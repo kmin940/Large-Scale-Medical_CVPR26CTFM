@@ -12,6 +12,52 @@ This work presents **VoCo**, a new method for Large-Scale 3D Medical Image Pre-t
 
 Linshan Wu, Jiaxin Zhuang, and <a href="https://scholar.google.com/citations?hl=en&user=Z_t5DjwAAAAJ">**Hao Chen^**</a>. [**"Large-Scale 3D Medical Image Pre-training with Geometric Context Priors"**](https://ieeexplore.ieee.org/document/11274411). **TPAMI 2025**.
 
+
+# Instructions for CVPR 2026: Foundation Models for General CT Image Diagnosis
+## Feature Extraction with Docker
+
+We provide a containerized pipeline to extract VoCo/VoComni SwinViT features for linear probing.
+The container runs [`extract_feat_LP.py`](./extract_feat_LP.py) on every `.nii.gz` in an input
+directory and writes per-sample `.h5` files (key `y_hat`, a 1D feature vector) to an output
+directory. The multi-scale feature dim is `31 * feature_size` (e.g. `5952` for `VoCo_H`).
+
+### Files
+- [`Dockerfile`](./Dockerfile) — build recipe based on `pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime`.
+- [`requirements_docker.txt`](./requirements_docker.txt) — minimal pip deps for feature extraction.
+- [`extract_feat_LP.sh`](./extract_feat_LP.sh) — entrypoint script driven by environment variables.
+- [`extract_feat_alldiseases.sh`](./extract_feat_alldiseases.sh) — host-side driver that sweeps a
+  list of diseases (ROI and non-ROI) to produce per-disease feature folders.
+
+### 1. Place the checkpoint
+
+The Dockerfile bakes in the **`VoCo_L_SSL_head.pt`** checkpoint. Download it from
+[HuggingFace](https://huggingface.co/Luffy503/VoCo/tree/main) and place it at:
+
+```
+Large-Scale-Medical/checkpoints/VoCo_L_SSL_head.pt
+```
+
+To bake a different variant (`VoCo_B_SSL_head.pt`, `VoCo_H_SSL_head.pt`, …), edit the
+`COPY` line in the Dockerfile and set `FEATURE_SIZE` accordingly at run time
+(`48` for B, `96` for L, `192` for H).
+
+### 2. Build the image
+
+```bash
+cd Large-Scale-Medical
+docker build -t voco_lp .
+docker save voco_lp | gzip > voco_lp.tar.gz
+```
+### 3. Extract features
+
+- for Non-ROI disease
+docker container run --gpus "device=0" -m 32G --name voco_lp --rm  -v $PWD/inputs/:/workspace/inputs/ -v $PWD/outputs/:/workspace/outputs/ voco_lp:latest /bin/bash -c "sh extract_feat_LP.sh"
+
+- for ROI disease (adrenal_hyperplasia as an example)
+docker container run --gpus "device=0" -m 32G --name modelname_alldata_lp --rm -e MASKS_DIR=/workspace/inputs/fg_masks/adrenal_hyperplasia -v $PWD/test_demo/:/workspace/inputs/ -v $PWD/outputs/:/workspace/outputs/ modelname_alldata_lp:latest /bin/bash -c "sh extract_feat_LP.sh"
+
+
+
 ![teaser](assets/data.svg)
 
 [//]: # (## News)
@@ -131,7 +177,6 @@ Please refer to [Acknowledgment](#Acknowledgment). Download our pre-processed [d
 ### Implementations
 Please refer to [Downstream](./Downstream): **50+** downstream tasks implementations.
 
-**We are uploading our fine-tuning checkpoints to [BaiduYun](https://pan.baidu.com/s/1w75cJWoWfCt2FSjMDYl1FA?pwd=r1rp) to make sure fair comparisons**.
 
 ## Pre-training <a name="Pre-training"></a>
 
