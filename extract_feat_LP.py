@@ -186,23 +186,57 @@ def load_pretrained_weights(model, model_dict):
 
     if "backbone." in list(state_dict.keys())[0]:
         print("Tag 'backbone.' found in state dict - fixing!")
-    for key in list(state_dict.keys()):
-        state_dict[key.replace("backbone.", "")] = state_dict.pop(key)
+        for key in list(state_dict.keys()):
+            state_dict[key.replace("backbone.", "")] = state_dict.pop(key)
 
     if "swin_vit" in list(state_dict.keys())[0]:
         print("Tag 'swin_vit' found in state dict - fixing!")
         for key in list(state_dict.keys()):
             state_dict[key.replace("swin_vit", "swinViT")] = state_dict.pop(key)
 
-    current_model_dict = model.state_dict()
-    new_state_dict = {
-        k: state_dict[k]
-        if (k in state_dict.keys()) and (state_dict[k].size() == current_model_dict[k].size())
-        else current_model_dict[k]
-        for k in current_model_dict.keys()
-    }
+    # VoCo/VoComni checkpoints are SwinUNETR state_dicts: the backbone tensors are
+    # stored as "swinViT.<name>", while this script builds the bare SwinTransformer
+    # whose parameters are named "<name>". Without stripping that prefix NOTHING
+    # matches and every tensor silently falls back to its random init below, making
+    # the extracted features noise. The 'swin_vit'->'swinViT' rule above maps the
+    # other direction (for SwinUNETR targets) and never fires on these keys.
+    if any(k.startswith("swinViT.") for k in state_dict.keys()):
+        print("Tag 'swinViT.' found in state dict - fixing!")
+        for key in list(state_dict.keys()):
+            if key.startswith("swinViT."):
+                state_dict[key[len("swinViT."):]] = state_dict.pop(key)
 
+    current_model_dict = model.state_dict()
+    matched, missing, mismatched = [], [], []
+    new_state_dict = {}
+    for k, v in current_model_dict.items():
+        if k not in state_dict:
+            missing.append(k)
+            new_state_dict[k] = v
+        elif state_dict[k].size() != v.size():
+            mismatched.append(
+                f"{k}: ckpt{tuple(state_dict[k].size())} vs model{tuple(v.size())}")
+            new_state_dict[k] = v
+        else:
+            matched.append(k)
+            new_state_dict[k] = state_dict[k]
+
+    # NOTE: strict=True is vacuous here -- new_state_dict is built over
+    # current_model_dict.keys(), so the key sets always agree and load_state_dict can
+    # never report a missing key. The explicit accounting below is the real check.
     model.load_state_dict(new_state_dict, strict=True)
+    print(f"Matched {len(matched)}/{len(current_model_dict)} pretrained tensors "
+          f"({len(state_dict) - len(matched)} unused checkpoint keys)")
+    if missing or mismatched:
+        for k in missing[:10]:
+            print(f"  MISSING from checkpoint (would stay randomly initialised): {k}")
+        for m in mismatched[:10]:
+            print(f"  SHAPE MISMATCH (would stay randomly initialised): {m}")
+        raise RuntimeError(
+            f"Refusing to extract with a partially initialised encoder: "
+            f"{len(missing)} missing and {len(mismatched)} shape-mismatched of "
+            f"{len(current_model_dict)} tensors. Features would be random noise. "
+            f"Check the checkpoint's key naming against the constructed model.")
     print("Using VoCo pretrained backbone weights !!!!!!!")
     return model
 
