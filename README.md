@@ -37,16 +37,33 @@ The Dockerfile bakes in the **`VoCo_L_SSL_head.pt`** checkpoint. Download it fro
 Large-Scale-Medical/checkpoints/VoCo_L_SSL_head.pt
 ```
 
-To bake a different variant (`VoCo_B_SSL_head.pt`, `VoCo_H_SSL_head.pt`, …), edit the
-`COPY` line in the Dockerfile and set `FEATURE_SIZE` accordingly at run time
-(`48` for B, `96` for L, `192` for H).
+To bake a different variant, drop its checkpoint in the same folder and pass the two
+build args — no Dockerfile edit and no run-time flags needed, since the image records
+`CHECKPOINT` and `FEATURE_SIZE` in its environment:
+
+| Variant | `VOCO_VARIANT` | `FEATURE_SIZE` | Embedding dim |
+|---|---|---|---|
+| VoCo-B | `B` | `48`  | 1488 |
+| VoCo-L (default) | `L` | `96`  | 2976 |
+| VoCo-H | `H` | `192` | 5952 |
+
+The embedding is the concatenation of the 5 hidden states plus the input projection,
+so its width is `31 x FEATURE_SIZE`. `FEATURE_SIZE` **must** match the checkpoint's
+backbone width — every tensor mismatches otherwise, and `load_pretrained_weights()`
+falls back to the random initialisation for each one.
 
 ### 2. Build the image
 
 ```bash
 cd Large-Scale-Medical
+
+# VoCo-L (default)
 docker build -t voco_lp .
 docker save voco_lp | gzip > voco_lp.tar.gz
+
+# VoCo-B
+docker build --build-arg VOCO_VARIANT=B --build-arg FEATURE_SIZE=48 -t voco-b_lp .
+docker save voco-b_lp | gzip > voco-b_lp.tar.gz
 ```
 ### 3. Extract features
 
