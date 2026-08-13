@@ -261,10 +261,32 @@ def main():
                         help="Target spacing (default: 1.5 1.5 1.5)")
     parser.add_argument("--fg_labels", type=int, nargs="+", default=None,
                         help="Foreground label IDs for mask cropping (default: [1])")
+    parser.add_argument("--allow_cpu", action="store_true",
+                        help="Permit CPU extraction. Off by default: per-case wall-clock "
+                             "is a benchmark metric, so a silent CPU fallback both "
+                             "invalidates it and is orders of magnitude slower.")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Require a GPU unless explicitly waived. This was previously
+    #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # which fell back to CPU without a word, so a container started without
+    # --gpus still produced correct-looking features -- at per-case timings that
+    # are both unusable as a metric and orders of magnitude slower.
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print(f"Using GPU: {torch.cuda.get_device_name(0)} "
+              f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'unset')})")
+    elif args.allow_cpu:
+        device = torch.device("cpu")
+        print("WARNING: no CUDA device -- running on CPU because --allow_cpu was passed. "
+              "Per-case timings from this run are NOT comparable to GPU runs.")
+    else:
+        raise RuntimeError(
+            "No CUDA device available. Feature extraction must run on a GPU: per-case "
+            "wall-clock is a benchmark metric and CPU inference is orders of magnitude "
+            "slower. Check that the container was started with --gpus \"device=N\" and "
+            "that torch can see it. Pass --allow_cpu to override deliberately.")
     spacing = tuple(args.spacing)
 
     # Build SwinViT backbone
@@ -293,6 +315,7 @@ def main():
     swinViT = load_pretrained_weights(swinViT, ckpt)
     swinViT.eval()
     swinViT.to(device)
+    print(f"Encoder on device: {next(swinViT.parameters()).device}")
 
     # Feature dimension: sum of all hidden state channels
     embed_dim = fs + 2 * fs + 4 * fs + 8 * fs + 16 * fs  # 31 * fs
